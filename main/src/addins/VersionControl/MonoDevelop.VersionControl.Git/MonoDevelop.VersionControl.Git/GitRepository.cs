@@ -401,7 +401,7 @@ namespace MonoDevelop.VersionControl.Git
 			try {
 				var refs = git.Fetch ().Call ().GetAdvertisedRefs ();
 				if (refs.Count > 0) {
-					throw new UserException ("The remote repository already contains branches. MonoDevelop can only publish to an empty repository");
+					throw new UserException ("The remote repository already contains branches. Publishing is only possible to an empty repository");
 				}
 			} catch {
 				try {
@@ -469,10 +469,12 @@ namespace MonoDevelop.VersionControl.Git
 				throw new InvalidOperationException ("No remotes defined");
 
 			monitor.Log.WriteLine (GettextCatalog.GetString ("Fetching from '{0}'", remote));
-			RemoteConfig remoteConfig = new RemoteConfig (RootRepository.GetConfig (), remote);
-			Transport tn = Transport.Open (RootRepository, remoteConfig);
-			using (var gm = new GitMonitor (monitor))
-				tn.Fetch (gm, null);
+			var fetch = new NGit.Api.Git (RootRepository).Fetch ();
+			using (var gm = new GitMonitor (monitor)) {
+				fetch.SetRemote (remote);
+				fetch.SetProgressMonitor (gm);
+				fetch.Call ();
+			}
 			monitor.Step (1);
 		}
 
@@ -550,7 +552,7 @@ namespace MonoDevelop.VersionControl.Git
 				}
 
 				if ((options & GitUpdateOptions.SaveLocalChanges) != GitUpdateOptions.SaveLocalChanges) {
-					VersionStatus unclean = VersionStatus.Modified | VersionStatus.ScheduledAdd | VersionStatus.ScheduledDelete;
+					const VersionStatus unclean = VersionStatus.Modified | VersionStatus.ScheduledAdd | VersionStatus.ScheduledDelete;
 					bool modified = false;
 					if (GetDirectoryVersionInfo (RootPath, false, true).Any (v => (v.Status & unclean) != VersionStatus.Unversioned))
 						modified = true;
