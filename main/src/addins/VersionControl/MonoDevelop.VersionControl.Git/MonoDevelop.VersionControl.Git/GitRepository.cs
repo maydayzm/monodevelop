@@ -887,6 +887,7 @@ namespace MonoDevelop.VersionControl.Git
 
 		protected override void OnRevert (FilePath[] localPaths, bool recurse, IProgressMonitor monitor)
 		{
+			// Replace with NGit.Api.Git.Reset ()
 			foreach (var group in GroupByRepository (localPaths)) {
 				var repository = group.Key;
 				var files = group.ToArray ();
@@ -1269,33 +1270,39 @@ namespace MonoDevelop.VersionControl.Git
 
 		public void Push (IProgressMonitor monitor, string remote, string remoteBranch)
 		{
-			RemoteConfig remoteConfig = new RemoteConfig (RootRepository.GetConfig (), remote);
-			Transport tp = Transport.Open (RootRepository, remoteConfig);
-			
 			string remoteRef = "refs/heads/" + remoteBranch;
-			
-			RemoteRefUpdate rr = new RemoteRefUpdate (RootRepository, RootRepository.GetBranch (), remoteRef, false, null, null);
-			List<RemoteRefUpdate> list = new List<RemoteRefUpdate> ();
-			list.Add (rr);
-			using (var gm = new GitMonitor (monitor))
-				tp.Push (gm, list);
-			switch (rr.GetStatus ()) {
-			case RemoteRefUpdate.Status.UP_TO_DATE: monitor.ReportSuccess (GettextCatalog.GetString ("Remote branch is up to date.")); break;
-			case RemoteRefUpdate.Status.REJECTED_NODELETE: monitor.ReportError (GettextCatalog.GetString ("The server is configured to deny deletion of the branch"), null); break;
-			case RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD: monitor.ReportError (GettextCatalog.GetString ("The update is a non-fast-forward update. Merge the remote changes before pushing again."), null); break;
-			case RemoteRefUpdate.Status.OK:
-				monitor.ReportSuccess (GettextCatalog.GetString ("Push operation successfully completed."));
-				// Update the remote branch
-				ObjectId headId = rr.GetNewObjectId ();
-				RefUpdate updateRef = RootRepository.UpdateRef (Constants.R_REMOTES + remote + "/" + remoteBranch);
-				updateRef.SetNewObjectId(headId);
-				updateRef.Update();
-				break;
-			default:
-				string msg = rr.GetMessage ();
-				msg = !string.IsNullOrEmpty (msg) ? msg : GettextCatalog.GetString ("Push operation failed");
-				monitor.ReportError (msg, null);
-				break;
+			IEnumerable<PushResult> res;
+
+			var push = new NGit.Api.Git (RootRepository).Push ();
+
+			// We only have one pushed branch.
+			push.SetRemote (remote).SetRefSpecs (new RefSpec (remoteRef));
+			using (var gm = new GitMonitor (monitor)) {
+				push.SetProgressMonitor (gm);
+				res = push.Call ();
+			}
+
+			foreach (var pr in res) {
+				var remoteUpdate = pr.GetRemoteUpdate (remoteRef);
+
+				switch (remoteUpdate.GetStatus ()) {
+					case RemoteRefUpdate.Status.UP_TO_DATE: monitor.ReportSuccess (GettextCatalog.GetString ("Remote branch is up to date.")); break;
+					case RemoteRefUpdate.Status.REJECTED_NODELETE: monitor.ReportError (GettextCatalog.GetString ("The server is configured to deny deletion of the branch"), null); break;
+					case RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD: monitor.ReportError (GettextCatalog.GetString ("The update is a non-fast-forward update. Merge the remote changes before pushing again."), null); break;
+					case RemoteRefUpdate.Status.OK:
+						monitor.ReportSuccess (GettextCatalog.GetString ("Push operation successfully completed."));
+						// Update the remote branch
+						ObjectId headId = remoteUpdate.GetNewObjectId ();
+						RefUpdate updateRef = RootRepository.UpdateRef (Constants.R_REMOTES + remote + "/" + remoteBranch);
+						updateRef.SetNewObjectId(headId);
+						updateRef.Update();
+						break;
+					default:
+						string msg = remoteUpdate.GetMessage ();
+						msg = !string.IsNullOrEmpty (msg) ? msg : GettextCatalog.GetString ("Push operation failed");
+						monitor.ReportError (msg, null);
+						break;
+				}
 			}
 		}
 
@@ -1397,7 +1404,11 @@ namespace MonoDevelop.VersionControl.Git
 
 		public IEnumerable<Branch> GetBranches ()
 		{
-			IDictionary<string, NGit.Ref> refs = RootRepository.RefDatabase.GetRefs (Constants.R_HEADS);
+/*			var list = new NGit.Api.Git (RootRepository).BranchList ();
+			foreach (var item in list.Call ()) {
+				string name = NGit.Repository.ShortenRefName (item.GetName ());*/
+
+			IDictionary<string, Ref> refs = RootRepository.RefDatabase.GetRefs (Constants.R_HEADS);
 			foreach (var pair in refs) {
 				string name = NGit.Repository.ShortenRefName (pair.Key);
 				Branch br = new Branch ();
@@ -1409,14 +1420,18 @@ namespace MonoDevelop.VersionControl.Git
 
 		public IEnumerable<string> GetTags ()
 		{
-			return RootRepository.GetTags ().Keys;
+			var list = new NGit.Api.Git (RootRepository).TagList ();
+			foreach (var item in list.Call ()) {
+				string name = NGit.Repository.ShortenRefName (item.GetName ());
+				yield return name;
+			}
 		}
 
 		public IEnumerable<string> GetRemoteBranches (string remoteName)
 		{
-			var refs = RootRepository.RefDatabase.GetRefs (Constants.R_REMOTES);
-			foreach (var pair in refs) {
-				string name = NGit.Repository.ShortenRefName (pair.Key);
+			var list = new NGit.Api.Git (RootRepository).BranchList ().SetListMode (ListBranchCommand.ListMode.REMOTE);
+			foreach (var item in list.Call ()) {
+				string name = NGit.Repository.ShortenRefName (item.GetName ());
 				if (name.StartsWith (remoteName + "/", StringComparison.Ordinal))
 					yield return name.Substring (remoteName.Length + 1);
 			}
@@ -1453,7 +1468,8 @@ namespace MonoDevelop.VersionControl.Git
 			
 				monitor.Step (1);
 			}
-			
+
+			// Replace with NGit.Api.Git ().Checkout ()
 			// Switch to the target branch
 			DirCache dc = RootRepository.LockDirCache ();
 			try {
