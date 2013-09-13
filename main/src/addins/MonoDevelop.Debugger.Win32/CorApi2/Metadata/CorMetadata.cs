@@ -648,7 +648,9 @@ namespace Microsoft.Samples.Debugging.CorMetadata
 					return typeof(GenericType);
 
 				case CorElementType.ELEMENT_TYPE_GENERICINST: {
-					Type t = ReadType (importer, ref pData);
+					uint token = CorSigUncompressToken (ref pData);
+					MetadataType t = new MetadataType (importer, (int) token);
+
 					List<Type> typeArgs = new List<Type> ();
 					uint num = CorSigUncompressData (ref pData);
 					for (int n=0; n<num; n++) {
